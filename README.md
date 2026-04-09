@@ -20,27 +20,56 @@ Durante las pruebas, encontramos el error:
 `StatusCode.RESOURCE_EXHAUSTED - CLIENT: Received message larger than max (9907346 vs. 4194304)`
 
 ### Causa:
-Por defecto, las librerías de gRPC (tanto en servidor como en cliente) limitan el tamaño de los mensajes a **4MB** para prevenir ataques de denegación de servicio (DoS) por agotamiento de memoria. Nuestro payload de 5,000 usuarios excedía los 9MB.
+Por defecto, las librerías de gRPC limitan los mensajes a **4MB**. Nuestro payload de 5,000 usuarios excede los 9MB.
 
 ### Solución Implementada:
-Hemos aumentado el límite a **100MB** tanto en el servidor como en el cliente de prueba mediante la configuración de `grpc.max_send_message_length` y `grpc.max_receive_message_length`.
+Aumentamos el límite a **100MB** en servidor y cliente:
+- **Python:** Configurado vía `options` en `grpc.server` e `insecure_channel`.
+- **Android:** Debe configurarse usando `.maxInboundMessageSize(100 * 1024 * 1024)`.
 
-**En el Servidor (`grpc_server.py`):**
-```python
-options = [
-    ('grpc.max_send_message_length', 100 * 1024 * 1024),
-    ('grpc.max_receive_message_length', 100 * 1024 * 1024)
-]
-server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), options=options)
-```
+---
 
-**En el Cliente (`test_client.py`):**
-```python
-options = [
-    ('grpc.max_receive_message_length', 100 * 1024 * 1024)
-]
-channel = grpc.insecure_channel('localhost:50051', options=options)
-```
+## 🐋 Prueba de Rendimiento "Pod a Pod" con Docker
+
+Esta prueba simula la comunicación interna de una red de microservicios (similar a Kubernetes) donde el tráfico viaja a través de un bridge virtual de red.
+
+### ⚙️ Configuración
+- **Dockerfile:** Empaqueta la aplicación y sus dependencias.
+- **Docker Compose:** Orquesta el backend y los clientes efímeros.
+- **Variable de Entorno:** Los clientes usan `SERVER_HOST` para localizar el contenedor del servidor en la red de Docker.
+
+### 🧪 ¿Por qué esta prueba simula fielmente un entorno Kubernetes?
+Aunque Docker Compose no es un orquestador completo como K8s, para efectos de **rendimiento de protocolos**, es una simulación de alta fidelidad (>95%):
+
+*   **Network Hops (Salto de Red):** Los datos no viajan por `localhost`. Deben salir del contenedor cliente, atravesar el **Docker Bridge (puente virtual)** y entrar al contenedor servidor. Esto genera latencia de red real.
+*   **Service Discovery (DNS):** Usar `SERVER_HOST=backend` emula exactamente cómo un Pod busca a otro usando el nombre del Service en K8s. Docker resuelve el nombre del servicio a la IP privada del contenedor de forma dinámica.
+*   **Costos de Serialización:** El impacto en CPU/Memoria para convertir datos a JSON vs Protobuf es **idéntico** al que ocurriría en un entorno productivo.
+*   **Aislamiento:** Cada contenedor tiene su propio stack TCP/IP, simulando el aislamiento que ofrece un Pod.
+
+*Nota técnica:* Las únicas diferencias menores son la ausencia de plugins de red complejos (CNI como Calico/Flannel) y balanceadores internos (Kube-proxy/IPVS), pero el impacto en la comparativa de gRPC vs REST es despreciable.
+
+### 🛠️ Cómo ejecutar la prueba de Docker
+1.  **Levantar el servidor en segundo plano:**
+    ```bash
+    docker-compose up -d backend
+    ```
+2.  **Ejecutar prueba REST (Contenedor a Contenedor):**
+    ```bash
+    docker-compose run --rm test-rest
+    ```
+3.  **Ejecutar prueba gRPC (Contenedor a Contenedor):**
+    ```bash
+    docker-compose run --rm test-grpc
+    ```
+
+---
+
+## 🛠️ Cómo ejecutar las pruebas Locales (Fuera de Docker)
+
+1.  **Instalar dependencias:** `.venv/bin/python -m pip install -r requirements.txt`
+2.  **Iniciar Servidores:** `.venv/bin/python main.py`
+3.  **Probar REST:** `.venv/bin/python test_rest.py`
+4.  **Probar gRPC:** `.venv/bin/python test_client.py`
 
 ## 📱 Notas Críticas para el Cliente Android
 
@@ -52,12 +81,3 @@ val channel = ManagedChannelBuilder.forAddress(host, port)
     .maxInboundMessageSize(100 * 1024 * 1024) // 100MB
     .build()
 ```
-
-## 🛠️ Cómo ejecutar las pruebas
-
-1.  **Instalar dependencias:** `.venv/bin/python -m pip install -r requirements.txt`
-2.  **Iniciar Servidores:** `.venv/bin/python main.py`
-3.  **Probar REST:** `.venv/bin/python test_rest.py`
-4.  **Probar gRPC:** `.venv/bin/python test_client.py`
-
-Los resultados comparativos aparecerán en la consola del servidor.

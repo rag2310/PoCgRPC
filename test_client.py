@@ -1,4 +1,5 @@
 import grpc
+import os
 from protos import schema_pb2, schema_pb2_grpc
 import time
 
@@ -9,10 +10,11 @@ def run_test():
         ('grpc.max_receive_message_length', 100 * 1024 * 1024)
     ]
     # Conectar al servidor con las opciones de tamaño
-    channel = grpc.insecure_channel('localhost:50051', options=options)
+    host = os.environ.get("SERVER_HOST", "localhost")
+    channel = grpc.insecure_channel(f'{host}:50051', options=options)
     stub = schema_pb2_grpc.DataServiceStub(channel)
     
-    print("Enviando petición gRPC a localhost:50051...")
+    print(f"Enviando petición gRPC a {host}:50051...")
     start_time = time.time()
     
     try:

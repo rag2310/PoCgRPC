@@ -1,9 +1,11 @@
 import urllib.request
 import json
 import time
+import os
 
 def run_test():
-    url = "http://localhost:8000/heavy-data"
+    host = os.environ.get("SERVER_HOST", "localhost")
+    url = f"http://{host}:8000/heavy-data"
     
     print(f"Enviando petición REST a {url}...")
     start_time = time.time()
